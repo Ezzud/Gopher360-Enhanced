@@ -32,8 +32,12 @@ jobs:
           }
 
           $current = Read-Version (Get-Content 'Windows/Gopher/Version.h' -Raw)
-          $previousText = git show 'HEAD^:Windows/Gopher/Version.h' 2>$null | Out-String
-          $previous = if ($previousText) { Read-Version $previousText } else { '' }
+          $previousPath = git ls-tree -r --name-only HEAD^ -- 'Windows/Gopher/Version.h'
+          if ($previousPath -eq 'Windows/Gopher/Version.h') {
+            $previous = Read-Version (git show 'HEAD^:Windows/Gopher/Version.h' | Out-String)
+          } else {
+            $previous = ''
+          }
           $changed = $current -ne $previous
           "version=$current" >> $env:GITHUB_OUTPUT
           "tag=v$current" >> $env:GITHUB_OUTPUT
