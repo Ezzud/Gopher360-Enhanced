@@ -4,8 +4,6 @@ on:
   push:
     branches:
       - master
-    paths:
-      - Windows/Gopher/Version.h
 
 permissions:
   contents: write
@@ -21,6 +19,8 @@ jobs:
 
       - name: Read version and detect a version change
         id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
         shell: pwsh
         run: |
           function Read-Version([string] $text) {
@@ -32,17 +32,13 @@ jobs:
           }
 
           $current = Read-Version (Get-Content 'Windows/Gopher/Version.h' -Raw)
-          $previousPath = git ls-tree -r --name-only HEAD^ -- 'Windows/Gopher/Version.h'
-          if ($previousPath -eq 'Windows/Gopher/Version.h') {
-            $previous = Read-Version (git show 'HEAD^:Windows/Gopher/Version.h' | Out-String)
-          } else {
-            $previous = ''
-          }
-          $changed = $current -ne $previous
+          $latestTag = (gh release list --limit 1 --json tagName --jq '.[0].tagName' 2>$null).Trim()
+          $latest = if ($latestTag) { $latestTag.TrimStart('v') } else { '' }
+          $changed = $current -ne $latest
           "version=$current" >> $env:GITHUB_OUTPUT
           "tag=v$current" >> $env:GITHUB_OUTPUT
           "changed=$($changed.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
-          Write-Host "Previous version: $previous"
+          Write-Host "Latest published release: $latest"
           Write-Host "Current version: $current"
           Write-Host "Version changed: $changed"
 
