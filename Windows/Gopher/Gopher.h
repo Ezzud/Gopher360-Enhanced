@@ -11,6 +11,8 @@
 #include <ShlObj.h>
 
 #include <map>
+#include <mutex>
+#include <atomic>
 
 #include "CXBOXController.h"
 
@@ -27,6 +29,10 @@ private:
   int SWAP_THUMBSTICKS = 0;             // Swaps the function of the thumbsticks when not equal to 0.
 
   XINPUT_STATE _currentState;
+  WORD _lastRawButtons = 0;
+  WORD _stableButtons = 0;
+  unsigned int _buttonSamples = 0;
+  bool _oskPrevious = false;
 
   // Cursor speed settings
   const float SPEED_ULTRALOW = 0.005f;
@@ -87,14 +93,46 @@ private:
   std::map<DWORD, bool> _xboxClickIsUp;
 
   std::list<WORD> _pressedKeys;
+  std::map<DWORD, WORD> _activeKeyboardMappings;
+  std::map<DWORD, WORD> _activeMouseMappings;
 
-  CXBOXController* _controller;
+  std::atomic<CXBOXController *> _controller;
+  HWND _notificationWindow = NULL;
+  std::mutex _configMutex;
 
 public:
 
   Gopher(CXBOXController* controller);
 
   void loadConfigFile();
+
+  /**
+   * Applies the current config.ini values to the input engine.
+   * Params: none.
+   * Returns: none.
+   */
+  void reloadConfig();
+
+  /**
+   * Changes the controller slot used by the input engine.
+   * Params: controller is the selected XInput controller.
+   * Returns: none.
+   */
+  void setController(CXBOXController *controller);
+
+  /**
+   * Sets whether controller input is currently processed.
+   * Params: enabled is the transient runtime state.
+   * Returns: none.
+   */
+  void setEnabled(bool enabled);
+
+  /**
+   * Returns whether controller input is currently processed.
+   * Params: none.
+   * Returns: true when enabled.
+   */
+  bool isEnabled() const;
 
   void loop();
 
@@ -128,7 +166,42 @@ public:
 
   HWND getOskWindow();
 
+  /**
+   * Opens or minimizes the Windows visual keyboard.
+   * Params: none.
+   * Returns: none.
+   */
+  void toggleVisualKeyboard();
+
+  /**
+   * Sets the window that receives tray notifications for runtime events.
+   * Params: window is the main UI window.
+   * Returns: none.
+   */
+  void setNotificationWindow(HWND window);
+
 private:
+
+  /**
+   * Releases all synthetic inputs currently held by the old configuration.
+   * Params: none.
+   * Returns: none.
+   */
+  void releasePressedInputs();
+
+  /**
+   * Releases keyboard values belonging to the configuration being replaced.
+   * Params: none.
+   * Returns: none.
+   */
+  void releaseConfiguredKeyboardInputs();
+
+  /**
+   * Clears alphabetic key states left by older held-key versions of Gopher360.
+   * Params: none.
+   * Returns: none.
+   */
+  void releaseLegacyKeyboardInputs();
 
   bool erasePressedKey(WORD key);
 };

@@ -1,0 +1,29 @@
+#include <windows.h>
+#include "Version.h"
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION GOPHER_VERSION_MAJOR,GOPHER_VERSION_MINOR,GOPHER_VERSION_PATCH,GOPHER_VERSION_BUILD
+ PRODUCTVERSION GOPHER_VERSION_MAJOR,GOPHER_VERSION_MINOR,GOPHER_VERSION_PATCH,GOPHER_VERSION_BUILD
+ FILEFLAGSMASK VS_FFI_FILEFLAGSMASK
+ FILEFLAGS 0
+ FILEOS VOS__WINDOWS32
+ FILETYPE VFT_APP
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "040904B0"
+    BEGIN
+      VALUE "CompanyName", "Gopher360 Enhanced\0"
+      VALUE "FileDescription", "Controller to keyboard and mouse input tool\0"
+      VALUE "FileVersion", GOPHER_VERSION_STRING "\0"
+      VALUE "InternalName", "Gopher360.exe\0"
+      VALUE "OriginalFilename", "Gopher360.exe\0"
+      VALUE "ProductName", "Gopher360 Enhanced\0"
+      VALUE "ProductVersion", GOPHER_VERSION_STRING "\0"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x0409, 1200
+  END
+END

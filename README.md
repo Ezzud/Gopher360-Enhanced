@@ -1,12 +1,14 @@
+Fork notice
+======
+
+This project is a maintained fork of [Tylemagne's Gopher360](https://github.com/Tylemagne/Gopher360). Gopher360 Enhanced adds a native configuration UI, controller hot-plug selection, editable XInput and keyboard mappings, visual-keyboard support, system-tray controls, structured configuration handling, and automated Windows releases.
+
+The maintained repository is [ezzud/gopher360-enhanced](https://github.com/ezzud/gopher360-enhanced).
+
 Download
 ======
 
-[![Github All Releases](https://img.shields.io/github/downloads/Tylemagne/Gopher360/total.svg?style=flat&label=Download%20Gopher360%20Standalone&logo=appveyor&colorA=00cc0a&colorB=000000)](https://github.com/Tylemagne/Gopher360/releases/download/v0.989/Gopher.exe)
-
-Donate
-======
-
-[![Donate](https://img.shields.io/badge/Donate-PayPal-green.svg)](https://www.paypal.com/cgi-bin/webscr?cmd=_s-xclick&hosted_button_id=ETDWNUEJG2UY2)
+[![Github All Releases](https://img.shields.io/github/downloads/ezzud/gopher360-enhanced/total.svg?style=flat&label=Download%20Gopher360%20Enhanced&logo=appveyor&colorA=00cc0a&colorB=000000)](https://github.com/ezzud/gopher360-enhanced/releases)
 
 Compatible Controllers
 ======
@@ -52,17 +54,17 @@ Gopher is a utility for couch-oriented PC users that wish to entirely control th
 
 Gopher separates itself from the competition by being efficient, small, portable, free, and fully open. If you have something you'd like to see improved, added, or changed, please fill out the survey.
 
-[![Github Releases (by Release)](https://img.shields.io/github/downloads/Tylemagne/Gopher360/v0.989/total.svg)]()
+[![Github Releases (by Release)](https://img.shields.io/github/downloads/ezzud/gopher360-enhanced/latest/total.svg)]()
 
-[![GitHub repo size in bytes](https://img.shields.io/github/repo-size/Tylemagne/Gopher360.svg)]()
+[![GitHub repo size in bytes](https://img.shields.io/github/repo-size/ezzud/gopher360-enhanced.svg)]()
 
-[![GitHub last commit](https://img.shields.io/github/last-commit/Tylemagne/gopher360.svg)]()
+[![GitHub last commit](https://img.shields.io/github/last-commit/ezzud/gopher360-enhanced.svg)]()
 
-[![GitHub top language](https://img.shields.io/github/languages/top/Tylemagne/gopher360.svg)]()
+[![GitHub top language](https://img.shields.io/github/languages/top/ezzud/gopher360-enhanced.svg)]()
 
-[![GitHub release](https://img.shields.io/github/release/Tylemagne/gopher360.svg)]()
+[![GitHub release](https://img.shields.io/github/release/ezzud/gopher360-enhanced.svg)]()
 
-[![Github commits (since latest release)](https://img.shields.io/github/commits-since/Tylemagne/gopher360/latest.svg)]()
+[![Github commits (since latest release)](https://img.shields.io/github/commits-since/ezzud/gopher360-enhanced/latest.svg)]()
 
 Requirements
 ======
@@ -84,7 +86,7 @@ https://vine.co/v/MYadBgWXuWY
 
 Download Instructions
 ======
-Download the latest release here: https://github.com/irungentoo/Gopher360/releases
+Download the latest release here: https://github.com/ezzud/gopher360-enhanced/releases
 
 I recommend that you copy it somewhere outside of the ZIP and make a shortcut to it. Adding it to your startup folder in your HTPC can make bootups a lot more convenient!
 

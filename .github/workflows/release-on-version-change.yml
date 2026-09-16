@@ -1,0 +1,90 @@
+name: Release on version change
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - Windows/Gopher/Version.h
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - name: Check out repository history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read version and detect a version change
+        id: version
+        shell: pwsh
+        run: |
+          function Read-Version([string] $text) {
+            $match = [regex]::Match($text, '#define\s+GOPHER_VERSION_STRING\s+"([^"]+)"')
+            if (-not $match.Success) {
+              throw 'GOPHER_VERSION_STRING was not found in Version.h.'
+            }
+            return $match.Groups[1].Value
+          }
+
+          $current = Read-Version (Get-Content 'Windows/Gopher/Version.h' -Raw)
+          $previousText = git show 'HEAD^:Windows/Gopher/Version.h' 2>$null | Out-String
+          $previous = if ($previousText) { Read-Version $previousText } else { '' }
+          $changed = $current -ne $previous
+          "version=$current" >> $env:GITHUB_OUTPUT
+          "tag=v$current" >> $env:GITHUB_OUTPUT
+          "changed=$($changed.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+          Write-Host "Previous version: $previous"
+          Write-Host "Current version: $current"
+          Write-Host "Version changed: $changed"
+
+      - name: Set up MSBuild
+        if: steps.version.outputs.changed == 'true'
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build Release Win32
+        if: steps.version.outputs.changed == 'true'
+        shell: pwsh
+        run: |
+          msbuild 'Windows/Gopher.sln' /t:Build /p:Configuration=Release /p:Platform=Win32 /p:PlatformToolset=v143 /p:WindowsTargetPlatformVersion=10.0.26100.0 /m
+
+      - name: Package required release files
+        if: steps.version.outputs.changed == 'true'
+        shell: pwsh
+        run: |
+          $stage = Join-Path $env:RUNNER_TEMP 'Gopher360-release'
+          New-Item -ItemType Directory -Force $stage | Out-Null
+          Copy-Item 'Windows/Release/Gopher360.exe' (Join-Path $stage 'Gopher360.exe')
+          Compress-Archive -Path (Join-Path $stage 'Gopher360.exe') -DestinationPath "Gopher360-${{ steps.version.outputs.version }}-win32.zip" -Force
+
+      - name: Generate release notes
+        if: steps.version.outputs.changed == 'true'
+        shell: pwsh
+        run: |
+          $previousTag = git tag --sort=-version:refname | Select-Object -First 1
+          $range = if ($previousTag) { "$previousTag..HEAD" } else { 'HEAD' }
+          $lines = @('# Gopher360 ${{ steps.version.outputs.version }}', '', '## Changes', '')
+          $commits = git log $range --pretty=format:'%H%x09%s%x09%an'
+          foreach ($commit in $commits) {
+            $parts = $commit -split "`t", 3
+            if ($parts.Count -eq 3) {
+              $sha = $parts[0]
+              $subject = $parts[1]
+              $author = $parts[2]
+              $url = "https://github.com/${{ github.repository }}/commit/$sha"
+              $lines += "- $subject ([commit]($url)) - $author"
+            }
+          }
+          Set-Content -Path release-notes.md -Value ($lines -join "`n") -Encoding utf8
+
+      - name: Create GitHub release
+        if: steps.version.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          gh release create '${{ steps.version.outputs.tag }}' "Gopher360-${{ steps.version.outputs.version }}-win32.zip" --title 'Gopher360 ${{ steps.version.outputs.version }}' --notes-file release-notes.md

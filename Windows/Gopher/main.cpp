@@ -22,12 +22,15 @@
 
 #include <windows.h> // for Beep()
 #include <iostream>
+#include <vector>
 
 
 #pragma comment(lib, "XInput9_1_0.lib")
 #pragma comment(lib, "winmm") // for volume
 
 #include "Gopher.h"
+#include "GopherUI.h"
+#include "ConfigFile.h"
 
 bool ChangeVolume(double nVolume, bool bScalar); // Not used yet
 BOOL isRunningAsAdministrator(); // Check if administrator, makes on-screen keyboard clickable
@@ -40,44 +43,31 @@ BOOL isRunningAsAdministrator(); // Check if administrator, makes on-screen keyb
  *   http://msdn.microsoft.com/en-us/library/windows/desktop/microsoft.directx_sdk.reference.xinput_gamepad%28v=vs.85%29.aspx
  */
 
-int main()
+/**
+ * Starts Gopher360, loads persisted settings, and enters the native UI loop.
+ * Params: instance is the process module handle; previousInstance and commandLine are unused Win32 startup values; showCommand controls initial window display.
+ * Returns: process exit code.
+ */
+int WINAPI WinMain(HINSTANCE instance, HINSTANCE previousInstance, LPSTR commandLine, int showCommand)
 {
-  CXBOXController controller(1);
-  Gopher gopher(&controller);
-  HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
-  SetConsoleTitle( TEXT( "Gopher360" ) );
-
-  system("Color 1D");
-
-  printf("Welcome to Gopher360 - a VERY fast and lightweight controller-to-keyboard & mouse input tool.\n");
-  printf("All you need is an Xbox360/Xbone controller (wired or wireless adapter), or DualShock (with InputMapper 1.5+)\n");
-  printf("Gopher will autofind the xinput device and begin reading input - if nothing happens, verify connectivity.\n");
-  printf("See the GitHub repository at bit.ly/1syAhMT for more info. Twitter contact: TylerAt60FPS\n\n-------------------------\n\n");
-  
-  SetConsoleTextAttribute(hConsole, 23);
-  printf("Gopher is free (as in freedom) software: you can redistribute it and/or modify\nit under the terms of the GNU General Public License as published by\nthe Free Software Foundation, either version 3 of the License, or\n(at your option) any later version.\n");
-  printf("\nYou should have received a copy of the GNU General Public License\nalong with this program. If not, see http://www.gnu.org/licenses/.");
-  SetConsoleTextAttribute(hConsole, 29);
-  printf("\n\n-------------------------\n\n");
-
-  SetConsoleTextAttribute(hConsole, 5); // set color to purple on black (windows only)
-  // 29 default
-
-  // dump important tips
-  printf("Tip - Press left and right bumpers simultaneously to toggle speeds! (Default is left and right bumpers, configurable in config.ini)\n");
-
-  if (!isRunningAsAdministrator())
+  (void)previousInstance;
+  (void)commandLine;
+  (void)showCommand;
+  std::vector<CXBOXController *> controllers;
+  for (int index = 1; index <= 4; ++index)
   {
-    printf("Tip - Not running as an admin! Windows on-screen keyboard and others won't work without admin rights.\n");
+    controllers.push_back(new CXBOXController(index));
   }
-
+  ConfigFile config("config.ini");
+  Gopher gopher(controllers[0]);
   gopher.loadConfigFile();
-
-  // Start the Gopher program loop
-  while (true)
+  GopherUI ui(&gopher, &config, controllers);
+  int result = ui.run(instance);
+  for (size_t index = 0; index < controllers.size(); ++index)
   {
-    gopher.loop();
+    delete controllers[index];
   }
+  return result;
 }
 
 BOOL isRunningAsAdministrator()

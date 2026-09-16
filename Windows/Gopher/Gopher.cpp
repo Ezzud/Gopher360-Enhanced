@@ -1,5 +1,10 @@
 #include "Gopher.h"
 #include "ConfigFile.h"
+#include <shellapi.h>
+#include <algorithm>
+#include <strsafe.h>
+
+#pragma comment(lib, "shell32.lib")
 
 // Description:
 //   Send a keyboard input to the system based on the key value
@@ -11,6 +16,7 @@
 void inputKeyboard(WORD cmd, DWORD flag)
 {
   INPUT input;
+  ZeroMemory(&input, sizeof(input));
   input.type = INPUT_KEYBOARD;
   input.ki.wScan = 0;
   input.ki.time = 0;
@@ -50,6 +56,7 @@ void inputKeyboardUp(WORD cmd)
 void mouseEvent(DWORD dwFlags, DWORD mouseData = 0)
 {
   INPUT input;
+  ZeroMemory(&input, sizeof(input));
   input.type = INPUT_MOUSE;
 
   // Only set mouseData when using a supported dwFlags type
@@ -73,6 +80,7 @@ void mouseEvent(DWORD dwFlags, DWORD mouseData = 0)
 Gopher::Gopher(CXBOXController * controller)
   : _controller(controller)
 {
+  releaseLegacyKeyboardInputs();
 }
 
 // Description:
@@ -80,6 +88,9 @@ Gopher::Gopher(CXBOXController * controller)
 //     configuration variables.
 void Gopher::loadConfigFile()
 {
+  std::lock_guard<std::mutex> lock(_configMutex);
+  releasePressedInputs();
+  releaseConfiguredKeyboardInputs();
   ConfigFile cfg("config.ini");
   
   //--------------------------------
@@ -92,7 +103,7 @@ void Gopher::loadConfigFile()
   CONFIG_DISABLE = strtol(cfg.getValueOfKey<std::string>("CONFIG_DISABLE").c_str(), 0, 0);
   CONFIG_DISABLE_VIBRATION = strtol(cfg.getValueOfKey<std::string>("CONFIG_DISABLE_VIBRATION").c_str(), 0, 0);
   CONFIG_SPEED_CHANGE = strtol(cfg.getValueOfKey<std::string>("CONFIG_SPEED_CHANGE").c_str(), 0, 0);
-  CONFIG_OSK = strtol(cfg.getValueOfKey<std::string>("CONFIG_OSK").c_str(), 0, 0);
+  CONFIG_OSK = strtol(cfg.getValueOfKey<std::string>("CONFIG_OSK", "0x0020").c_str(), 0, 0);
 
   //--------------------------------
   // Controller bindings
@@ -191,15 +202,100 @@ void Gopher::loadConfigFile()
   setWindowVisibility(_hidden);
 }
 
+/**
+ * Applies the current config.ini values to the input engine.
+ * Params: none.
+ * Returns: none.
+ */
+void Gopher::reloadConfig()
+{
+  loadConfigFile();
+}
+
+/**
+ * Changes the controller slot used by the input engine.
+ * Params: controller is the selected XInput controller.
+ * Returns: none.
+ */
+void Gopher::setController(CXBOXController *controller)
+{
+  _controller.store(controller);
+}
+
+/**
+ * Sets whether controller input is currently processed.
+ * Params: enabled is the transient runtime state.
+ * Returns: none.
+ */
+void Gopher::setEnabled(bool enabled)
+{
+  std::lock_guard<std::mutex> lock(_configMutex);
+  if (!enabled && !_disabled)
+  {
+    for (std::list<WORD>::iterator it = _pressedKeys.begin(); it != _pressedKeys.end(); ++it)
+    {
+      if (*it == VK_LBUTTON)
+      {
+        mouseEvent(MOUSEEVENTF_LEFTUP);
+      }
+      else if (*it == VK_RBUTTON)
+      {
+        mouseEvent(MOUSEEVENTF_RIGHTUP);
+      }
+      else if (*it == VK_MBUTTON)
+      {
+        mouseEvent(MOUSEEVENTF_MIDDLEUP);
+      }
+      else
+      {
+        inputKeyboardUp(*it);
+      }
+    }
+    _pressedKeys.clear();
+    _activeKeyboardMappings.clear();
+    _activeMouseMappings.clear();
+  }
+  _disabled = !enabled;
+}
+
+/**
+ * Returns whether controller input is currently processed.
+ * Params: none.
+ * Returns: true when enabled.
+ */
+bool Gopher::isEnabled() const
+{
+  return !_disabled;
+}
+
 // Description:
 //   The main program loop. Handles the gamepad inputs and converts them
 //     to system inputs based on the mapping provided by the configuration
 //     file.
 void Gopher::loop()
 {
+  std::lock_guard<std::mutex> lock(_configMutex);
+
   Sleep(SLEEP_AMOUNT);
 
-  _currentState = _controller->GetState();
+  _currentState = _controller.load()->GetState();
+  if (_currentState.Gamepad.wButtons == _lastRawButtons)
+  {
+    if (_buttonSamples < 2)
+    {
+      ++_buttonSamples;
+    }
+  }
+  else
+  {
+    _lastRawButtons = _currentState.Gamepad.wButtons;
+    _buttonSamples = 0;
+  }
+  if (_buttonSamples >= 1)
+  {
+    _stableButtons = _lastRawButtons;
+  }
+  _currentState.Gamepad.wButtons = _stableButtons;
 
   // Disable Gopher
   handleDisableButton();
@@ -241,24 +337,12 @@ void Gopher::loop()
   // Toggle the on-screen keyboard
   if (CONFIG_OSK)
   {
-    setXboxClickState(CONFIG_OSK);
-    if (_xboxClickIsDown[CONFIG_OSK])
+    bool oskDown = (_currentState.Gamepad.wButtons & CONFIG_OSK) == CONFIG_OSK;
+    if (oskDown && !_oskPrevious)
     {
-      // Get the otk window
-      HWND otk_win = getOskWindow();
-      if (otk_win == NULL)
-      {
-        printf("Please start the On-screen keyboard first\n");
-      }
-      else if(IsIconic(otk_win))
-      {
-        ShowWindow(otk_win, SW_RESTORE);
-      }
-      else
-      {
-        ShowWindow(otk_win, SW_MINIMIZE);
-      }
+      toggleVisualKeyboard();
     }
+    _oskPrevious = oskDown;
   }
 
   // Will change between the current speed values
@@ -338,6 +422,81 @@ void Gopher::loop()
   }
 }
 
+/**
+ * Opens or minimizes the Windows visual keyboard.
+ * Params: none.
+ * Returns: none.
+ */
+void Gopher::toggleVisualKeyboard()
+{
+  HWND keyboard = getOskWindow();
+  if (keyboard == NULL)
+  {
+    TCHAR windowsDirectory[MAX_PATH];
+    GetWindowsDirectory(windowsDirectory, ARRAYSIZE(windowsDirectory));
+    const TCHAR *folders[] = { TEXT("System32"), TEXT("Sysnative"), TEXT("SysWOW64") };
+    for (size_t index = 0; index < sizeof(folders) / sizeof(folders[0]); ++index)
+    {
+      TCHAR executable[MAX_PATH];
+      StringCchPrintf(executable, ARRAYSIZE(executable), TEXT("%s\\%s\\osk.exe"), windowsDirectory, folders[index]);
+      if (GetFileAttributes(executable) == INVALID_FILE_ATTRIBUTES)
+      {
+        continue;
+      }
+      HINSTANCE result = ShellExecute(NULL, TEXT("open"), executable, NULL, NULL, SW_SHOWNORMAL);
+      if ((INT_PTR)result > 32)
+      {
+        return;
+      }
+    }
+    HINSTANCE result = ShellExecute(NULL, TEXT("open"), TEXT("osk.exe"), NULL, NULL, SW_SHOWNORMAL);
+    if ((INT_PTR)result <= 32)
+    {
+      if (_notificationWindow != NULL)
+        PostMessage(_notificationWindow, WM_APP + 2, 0, (LPARAM)TEXT("Error: could not open visual keyboard"));
+    }
+    return;
+  }
+  if (IsWindowVisible(keyboard) && !IsIconic(keyboard))
+  {
+    ShowWindow(keyboard, SW_MINIMIZE);
+    if (IsWindow(keyboard))
+    {
+      if (_notificationWindow != NULL)
+        PostMessage(_notificationWindow, WM_APP + 2, 0, (LPARAM)TEXT("Visual keyboard closed"));
+    }
+    else if (_notificationWindow != NULL)
+    {
+      PostMessage(_notificationWindow, WM_APP + 2, 0, (LPARAM)TEXT("Error: could not close visual keyboard"));
+    }
+  }
+  else
+  {
+    ShowWindow(keyboard, SW_RESTORE);
+    if (IsWindow(keyboard))
+    {
+      SetForegroundWindow(keyboard);
+      if (_notificationWindow != NULL)
+        PostMessage(_notificationWindow, WM_APP + 2, 0, (LPARAM)TEXT("Visual keyboard opened"));
+    }
+    else if (_notificationWindow != NULL)
+    {
+      PostMessage(_notificationWindow, WM_APP + 2, 0, (LPARAM)TEXT("Error: could not open visual keyboard"));
+    }
+  }
+}
+
+/**
+ * Sets the window that receives tray notifications for runtime events.
+ * Params: window is the main UI window.
+ * Returns: none.
+ */
+void Gopher::setNotificationWindow(HWND window)
+{
+  std::lock_guard<std::mutex> lock(_configMutex);
+  _notificationWindow = window;
+}
+
 // Description:
 //   Sends a vibration pulse to the controller for a duration of time.
 //     This is a BLOCKING call. Any inputs during the vibration will be IGNORED.
@@ -350,9 +509,9 @@ void Gopher::pulseVibrate(const int duration, const int l, const int r) const
 {
   if(!_vibrationDisabled)
   {
-    _controller->Vibrate(l, r);
+    _controller.load()->Vibrate(l, r);
     Sleep(duration);
-    _controller->Vibrate(0, 0);
+    _controller.load()->Vibrate(0, 0);
   }
 }
 
@@ -441,8 +600,10 @@ void Gopher::toggleWindowVisibility()
 //   hidden   Hides the window when true
 void Gopher::setWindowVisibility(const bool &hidden) const
 {
-  HWND hWnd = GetConsoleWindow();
-  ShowWindow(hWnd, _hidden ? SW_HIDE : SW_SHOW);
+  if (_notificationWindow != NULL)
+  {
+    ShowWindow(_notificationWindow, hidden ? SW_HIDE : SW_SHOW);
+  }
 }
 
 template <typename T>
@@ -690,19 +851,19 @@ void Gopher::mapKeyboard(DWORD STATE, WORD key)
   setXboxClickState(STATE);
   if (_xboxClickIsDown[STATE])
   {
-    inputKeyboardDown(key);
-
-    // Add key to the list of pressed keys.
-    _pressedKeys.push_back(key);
+    if (_activeKeyboardMappings.find(STATE) == _activeKeyboardMappings.end())
+    {
+      _activeKeyboardMappings[STATE] = key;
+      inputKeyboardDown(key);
+      inputKeyboardUp(key);
+    }
   }
 
   if (_xboxClickIsUp[STATE])
   {
-    inputKeyboardUp(key);
-
-    // Remove key from the list of pressed keys.
-    erasePressedKey(key);
+    _activeKeyboardMappings.erase(STATE);
   }
+
 }
 
 // Description:
@@ -717,39 +878,40 @@ void Gopher::mapMouseClick(DWORD STATE, DWORD keyDown, DWORD keyUp)
   setXboxClickState(STATE);
   if (_xboxClickIsDown[STATE])
   {
-    mouseEvent(keyDown);
-
-    // Add key to the list of pressed keys.
-    if (keyDown == MOUSEEVENTF_LEFTDOWN)
+    WORD pressedKey = keyDown == MOUSEEVENTF_LEFTDOWN ? VK_LBUTTON :
+      keyDown == MOUSEEVENTF_RIGHTDOWN ? VK_RBUTTON : VK_MBUTTON;
+    if (_activeMouseMappings.find(STATE) == _activeMouseMappings.end())
     {
-      _pressedKeys.push_back(VK_LBUTTON);
-    }
-    else if (keyDown == MOUSEEVENTF_RIGHTDOWN)
-    {
-      _pressedKeys.push_back(VK_RBUTTON);
-    }
-    else if (keyDown == MOUSEEVENTF_MIDDLEDOWN)
-    {
-      _pressedKeys.push_back(VK_MBUTTON);
+      _activeMouseMappings[STATE] = pressedKey;
+      if (std::find(_pressedKeys.begin(), _pressedKeys.end(), pressedKey) == _pressedKeys.end())
+      {
+        mouseEvent(keyDown);
+        _pressedKeys.push_back(pressedKey);
+      }
     }
   }
 
   if (_xboxClickIsUp[STATE])
   {
-    mouseEvent(keyUp);
-
-    // Remove key from the list of pressed keys.
-    if (keyUp == MOUSEEVENTF_LEFTUP)
+    std::map<DWORD, WORD>::iterator active = _activeMouseMappings.find(STATE);
+    if (active != _activeMouseMappings.end())
     {
-      erasePressedKey(VK_LBUTTON);
-    }
-    else if (keyUp == MOUSEEVENTF_RIGHTUP)
-    {
-      erasePressedKey(VK_RBUTTON);
-    }
-    else if (keyUp == MOUSEEVENTF_MIDDLEUP)
-    {
-      erasePressedKey(VK_MBUTTON);
+      WORD activeKey = active->second;
+      _activeMouseMappings.erase(active);
+      bool stillOwned = false;
+      for (std::map<DWORD, WORD>::const_iterator it = _activeMouseMappings.begin(); it != _activeMouseMappings.end(); ++it)
+      {
+        if (it->second == activeKey)
+        {
+          stillOwned = true;
+          break;
+        }
+      }
+      if (!stillOwned)
+      {
+        mouseEvent(keyUp);
+        erasePressedKey(activeKey);
+      }
     }
   }
 
@@ -773,8 +935,7 @@ void Gopher::mapMouseClick(DWORD STATE, DWORD keyDown, DWORD keyUp)
 static BOOL CALLBACK EnumWindowsProc(HWND curWnd, LPARAM lParam)
 {
   TCHAR title[256];
-  // Check to see if the window title matches what we are looking for.
-  if (GetWindowText(curWnd, title, 256) && !_tcscmp(title, _T("On-Screen Keyboard")))
+  if (GetWindowText(curWnd, title, ARRAYSIZE(title)) && _tcsstr(title, _T("On-Screen Keyboard")) != NULL)
   {
     *(HWND*)lParam = curWnd;
     return FALSE;  // Correct window found, stop enumerating through windows.
@@ -817,4 +978,78 @@ bool Gopher::erasePressedKey(WORD key)
   }
 
   return false;
+}
+
+/**
+ * Releases all synthetic inputs currently held by the old configuration.
+ * Params: none.
+ * Returns: none.
+ */
+void Gopher::releasePressedInputs()
+{
+  for (std::list<WORD>::iterator it = _pressedKeys.begin(); it != _pressedKeys.end(); ++it)
+  {
+    if (*it == VK_LBUTTON)
+    {
+      mouseEvent(MOUSEEVENTF_LEFTUP);
+    }
+    else if (*it == VK_RBUTTON)
+    {
+      mouseEvent(MOUSEEVENTF_RIGHTUP);
+    }
+    else if (*it == VK_MBUTTON)
+    {
+      mouseEvent(MOUSEEVENTF_MIDDLEUP);
+    }
+    else
+    {
+      inputKeyboardUp(*it);
+    }
+  }
+  _pressedKeys.clear();
+  _activeKeyboardMappings.clear();
+  _activeMouseMappings.clear();
+  _xboxClickStateLastIteration.clear();
+  _xboxClickIsDown.clear();
+  _xboxClickIsDownLong.clear();
+  _xboxClickDownLength.clear();
+  _xboxClickIsUp.clear();
+  _lTriggerPrevious = false;
+  _rTriggerPrevious = false;
+  _oskPrevious = false;
+}
+
+/**
+ * Releases keyboard values belonging to the configuration being replaced.
+ * Params: none.
+ * Returns: none.
+ */
+void Gopher::releaseConfiguredKeyboardInputs()
+{
+  const DWORD configuredKeys[] = {
+    GAMEPAD_DPAD_UP, GAMEPAD_DPAD_DOWN, GAMEPAD_DPAD_LEFT, GAMEPAD_DPAD_RIGHT,
+    GAMEPAD_START, GAMEPAD_BACK, GAMEPAD_LEFT_THUMB, GAMEPAD_RIGHT_THUMB,
+    GAMEPAD_LEFT_SHOULDER, GAMEPAD_RIGHT_SHOULDER, GAMEPAD_A, GAMEPAD_B,
+    GAMEPAD_X, GAMEPAD_Y, GAMEPAD_TRIGGER_LEFT, GAMEPAD_TRIGGER_RIGHT
+  };
+  for (size_t index = 0; index < sizeof(configuredKeys) / sizeof(configuredKeys[0]); ++index)
+  {
+    if (configuredKeys[index] != 0)
+    {
+      inputKeyboardUp((WORD)configuredKeys[index]);
+    }
+  }
+}
+
+/**
+ * Clears alphabetic key states left by older held-key versions of Gopher360.
+ * Params: none.
+ * Returns: none.
+ */
+void Gopher::releaseLegacyKeyboardInputs()
+{
+  for (WORD key = 'A'; key <= 'Z'; ++key)
+  {
+    inputKeyboardUp(key);
+  }
 }
